@@ -2240,70 +2240,9 @@ class APIHandler(BaseHTTPRequestHandler):
                 self._send_html(self._get_dashboard_page())
             elif path == '/validator':
                 self._send_html(self._get_validator_page())
-            
-            # ===== API ЭНДПОИНТЫ =====
-            
-            # HEALTH CHECK
-            elif path == '/api/health':
-                self._send_json({
-                    'status': 'healthy',
-                    'version': '15.2',
-                    'network': 'Absolute Blockchain',
-                    'height': self.blockchain.get_blockchain_info().get('blocks', 0),
-                    'timestamp': int(time.time())
-                })
-            
-            # AUTH VERIFY
-            elif path == '/api/auth/verify':
-                try:
-                    from api.auth.jwt_handler import jwt_auth
-                    auth_header = self.headers.get('Authorization', '')
-                    if not auth_header.startswith('Bearer '):
-                        self._send_json({'success': False, 'error': 'No token provided'})
-                        return
-                    token = auth_header[7:]
-                    user = jwt_auth.get_user_from_token(token)
-                    if user:
-                        self._send_json({'success': True, 'valid': True, 'address': user})
-                    else:
-                        self._send_json({'success': False, 'valid': False, 'error': 'Invalid token'})
-                except Exception as e:
-                    self._send_json({'success': False, 'error': str(e)})
-            
-            # AUTH STATS
-            elif path == '/api/auth/stats':
-                try:
-                    from api.auth.jwt_handler import jwt_auth
-                    stats = jwt_auth.get_stats()
-                    self._send_json({
-                        'success': True,
-                        'active_sessions': stats.get('active_refresh_tokens', 0),
-                        'active_challenges': stats.get('active_challenges', 0),
-                        'blacklist_size': stats.get('blacklist_size', 0)
-                    })
-                except Exception as e:
-                    self._send_json({'success': False, 'error': str(e)})
-            
-            # УЛУЧШЕННЫЙ /api/stats (без scientific notation)
+            # API эндпоинты
             elif path == '/api/stats':
-                info = self.blockchain.get_blockchain_info()
-                total_supply_raw = info.get('total_supply', 0)
-                if isinstance(total_supply_raw, float):
-                    total_supply_satoshi = int(total_supply_raw)
-                else:
-                    total_supply_satoshi = total_supply_raw
-                self._send_json({
-                    'network': info.get('network', 'Absolute Blockchain'),
-                    'version': '15.2',
-                    'blocks': info.get('blocks', 0),
-                    'difficulty': info.get('difficulty', 1),
-                    'pending_transactions': info.get('pending_transactions', 0),
-                    'total_supply_satoshi': total_supply_satoshi,
-                    'total_supply_abs': total_supply_satoshi / 100_000_000,
-                    'consensus': info.get('consensus', 'DPoS'),
-                    'validators_count': info.get('validators_count', 0),
-                    'peers': info.get('peers', 0)
-                })
+                self._send_json(self.blockchain.get_blockchain_info())
 
             elif path == '/api/mempool/stats':
                 stats = self.mempool.get_stats()

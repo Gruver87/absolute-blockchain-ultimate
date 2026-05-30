@@ -1,0 +1,40 @@
+﻿<!DOCTYPE html>
+<html>
+<head><title>Инструкция по добавлению AUTH эндпоинтов</title></head>
+<body style="font-family: monospace; padding: 20px;">
+<h2>Добавление AUTH эндпоинтов в do_GET</h2>
+<ol>
+<li>Откройте файл: <code>ABSOLUTE_FINAL_FIXED.py</code></li>
+<li>Найдите строку: <code>def do_GET(self):</code></li>
+<li>Найдите последний <code>elif</code> перед <code>else:</code></li>
+<li>Вставьте следующий код <strong>ПЕРЕД</strong> строкой <code>else:</code></li>
+</ol>
+<pre style="background: #f0f0f0; padding: 10px;">
+            elif path == '/api/auth/verify':
+                try:
+                    from api.auth.jwt_handler import jwt_auth
+                    auth_header = self.headers.get('Authorization', '')
+                    if not auth_header.startswith('Bearer '):
+                        self._send_json({'success': False, 'error': 'No token provided'})
+                        return
+                    token = auth_header[7:]
+                    user = jwt_auth.get_user_from_token(token)
+                    if user:
+                        self._send_json({'success': True, 'valid': True, 'address': user})
+                    else:
+                        self._send_json({'success': False, 'valid': False, 'error': 'Invalid token'})
+                except Exception as e:
+                    self._send_json({'success': False, 'error': str(e)})
+
+            elif path == '/api/auth/stats':
+                try:
+                    from api.auth.jwt_handler import jwt_auth
+                    self._send_json(jwt_auth.get_stats())
+                except Exception as e:
+                    self._send_json({'success': False, 'error': str(e)})
+</pre>
+<li>Сохраните файл (Ctrl+S)</li>
+<li>Перезапустите блокчейн</li>
+</ol>
+</body>
+</html>
