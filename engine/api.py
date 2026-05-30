@@ -1,41 +1,57 @@
 ﻿# engine/api.py
-from typing import Dict, List, Any
-from execution.core import ExecutionLayer
+from typing import Dict, Any, Optional
+from execution.payload import ExecutionPayload
+from execution.payload_validator import PayloadValidator
+from state.state import State
+
 
 class EngineAPI:
-    """Engine API — bridge between Execution Layer and Consensus Layer"""
-    
-    def __init__(self, execution: ExecutionLayer):
-        self.execution = execution
-    
-    def new_payload(self, block: Dict) -> Dict:
+    """Engine API — связь между Consensus и Execution Layer"""
+
+    def __init__(self):
+        self.current_payload = None
+        self.last_validated = None
+
+    def new_payload(self, payload: ExecutionPayload, state: State, receipts: list) -> Dict:
         """
-        Consensus client sends new block payload
-        Returns execution result and state root
+        engine_newPayloadV1
+        Consensus layer отправляет новый блок для валидации
         """
-        receipts = self.execution.execute_block(block)
-        
+        # Валидация payload
+        is_valid = PayloadValidator.validate(payload, state, receipts)
+
+        if not is_valid:
+            return {
+                "status": "INVALID",
+                "error": "Payload validation failed"
+            }
+
+        self.current_payload = payload
+        self.last_validated = payload.block_hash
+
         return {
             "status": "VALID",
-            "state_root": self.execution.get_state_root(),
-            "receipts": receipts,
-            "gas_used": sum(r.get("gas_used", 0) for r in receipts)
+            "block_hash": payload.block_hash,
+            "state_root": payload.state_root
         }
-    
-    def fork_choice_updated(self, head_block_hash: str, finalized_block_hash: str = None) -> Dict:
+
+    def forkchoice_updated(self, head_hash: str, safe_hash: str = None, finalized_hash: str = None) -> Dict:
         """
-        Consensus client updates fork choice
-        Returns payload status
+        engine_forkchoiceUpdatedV1
+        Обновление выбора цепочки
         """
         return {
-            "status": "SUCCESS",
-            "head_block_hash": head_block_hash,
-            "finalized_block_hash": finalized_block_hash
+            "status": "VALID",
+            "head_block_hash": head_hash,
+            "safe_block_hash": safe_hash,
+            "finalized_block_hash": finalized_hash
         }
-    
-    def get_payload(self, block_hash: str) -> Dict:
-        """Retrieve payload by block hash"""
-        return self.execution.db.get_block_by_hash(block_hash)
-    
-    def get_state_root(self) -> str:
-        return self.execution.get_state_root()
+
+    def get_payload(self, block_hash: str) -> Optional[ExecutionPayload]:
+        """
+        engine_getPayloadV1
+        Получение payload по хэшу
+        """
+        if self.current_payload and self.current_payload.block_hash == block_hash:
+            return self.current_payload
+        return None

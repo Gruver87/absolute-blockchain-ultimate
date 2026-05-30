@@ -1,36 +1,69 @@
 ﻿# core/fork_choice.py
-from typing import List, Any
+"""
+Fork choice rule — LMD-GHOST simplified
+Chooses the heaviest/longest chain
+"""
 
-class BlockChain:
-    def __init__(self, chain: list, weight: int = 0):
-        self.chain = chain
-        self.weight = weight
-    
-    def total_weight(self) -> int:
-        return self.weight
-    
-    def __len__(self):
-        return len(self.chain)
+from typing import List, Dict, Any, Optional
+
 
 class ForkChoice:
-    """LMD-GHOST simplified fork choice rule"""
-    
+    """
+    Упрощённый fork choice rule
+    Выбирает цепочку с наибольшей высотой
+    """
+
     @staticmethod
-    def choose(chains: List[BlockChain]) -> BlockChain:
+    def choose_head(chains: List[List[Dict]]) -> Optional[Dict]:
         """
-        Choose the heaviest chain (highest weight + longest)
+        Выбирает голову из нескольких цепочек
+        Простейшее правило: самая длинная цепочка
         """
         if not chains:
             return None
-        
-        def chain_score(c: BlockChain) -> tuple:
-            return (c.total_weight(), len(c.chain))
-        
-        return max(chains, key=chain_score)
-    
+
+        best = None
+        best_height = -1
+
+        for chain in chains:
+            if not chain:
+                continue
+            height = chain[-1].get("block_number", -1)
+            if height > best_height:
+                best_height = height
+                best = chain[-1]
+
+        return best
+
     @staticmethod
-    def choose_by_weight(chains: List[BlockChain]) -> BlockChain:
-        """Weight-only choice (simpler)"""
+    def choose_head_by_weight(chains: List[Dict]) -> Optional[Dict]:
+        """
+        Выбирает голову по весу (weight = block_number для простоты)
+        """
         if not chains:
             return None
-        return max(chains, key=lambda c: c.total_weight())
+
+        return max(chains, key=lambda x: x.get("block_number", 0))
+
+    @staticmethod
+    def compare_chains(chain_a: List[Dict], chain_b: List[Dict]) -> int:
+        """
+        Сравнивает две цепочки
+        Returns: 1 if A is better, -1 if B is better, 0 if equal
+        """
+        if not chain_a and not chain_b:
+            return 0
+        if not chain_a:
+            return -1
+        if not chain_b:
+            return 1
+
+        height_a = chain_a[-1].get("block_number", 0)
+        height_b = chain_b[-1].get("block_number", 0)
+
+        if height_a > height_b:
+            return 1
+        elif height_b > height_a:
+            return -1
+        else:
+            return 0

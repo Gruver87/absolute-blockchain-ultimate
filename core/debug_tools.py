@@ -93,30 +93,47 @@ class ForkReplaySystem:
     
     def replay_chain(self, blocks: List[Dict]) -> bool:
         """Replay chain from blocks"""
-        for block in blocks:
-            success = self.processor.process_block(block)
-            self.replay_log.append({
-                "block": block,
-                "success": success,
-                "state_root": self.processor.get_state_root()
-            })
-            if not success:
-                return False
+        for block_dict in blocks:
+            # Convert dict to Block object if needed
+            if hasattr(self.processor, 'process_block'):
+                # Try to create Block object
+                from geth_core.processor import Block
+                if isinstance(block_dict, dict):
+                    block = Block(
+                        number=block_dict.get("number", 0),
+                        transactions=block_dict.get("transactions", []),
+                        parent_hash=block_dict.get("parent_hash", "0" * 64),
+                        proposer=block_dict.get("proposer", "unknown")
+                    )
+                else:
+                    block = block_dict
+                
+                success = self.processor.process_block(block)
+                self.replay_log.append({
+                    "block": block_dict,
+                    "success": success,
+                    "state_root": self.processor.get_state_root()
+                })
+                if not success:
+                    return False
         return True
     
     def compare_replay(self, chain_a: List[Dict], chain_b: List[Dict]) -> Dict:
         """Compare two replay results"""
-        state_a = None
-        state_b = None
+        # Save original state
+        original_chain = self.processor.chain.copy() if hasattr(self.processor, 'chain') else []
         
         # Replay chain A
         self.replay_chain(chain_a)
-        state_a = self.processor.state.root_hash()
+        state_a = self.processor.get_state_root()
         
-        # Reset and replay chain B
-        self.processor.state.clear()
+        # Reset
+        if hasattr(self.processor, 'chain'):
+            self.processor.chain = original_chain.copy()
+        
+        # Replay chain B
         self.replay_chain(chain_b)
-        state_b = self.processor.state.root_hash()
+        state_b = self.processor.get_state_root()
         
         return {
             "chain_a_root": state_a,
@@ -145,7 +162,6 @@ class AdversarialFuzzer:
         """Create corrupted version of block"""
         import copy
         corrupted = copy.deepcopy(original)
-        # Randomly corrupt one field
         import random
         fields = list(corrupted.keys())
         if fields:
@@ -183,7 +199,8 @@ class ConsensusSimulator:
     def simulate_attestation_delay(self, block_hash: str, validator: str, delay_seconds: int):
         """Simulate delayed attestations"""
         import time
-        time.sleep(delay_seconds)
+        if delay_seconds > 0:
+            time.sleep(delay_seconds)
         self.beacon.add_attestation(block_hash, validator)
         self.simulation_log.append({
             "type": "delayed_attestation",
