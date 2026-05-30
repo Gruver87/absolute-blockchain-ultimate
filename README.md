@@ -115,14 +115,21 @@ Absolute Blockchain is an **experimental blockchain framework** built from scrat
 curl http://localhost:8080/api/health
 curl http://localhost:8080/api/stats
 curl http://localhost:8080/api/mempool/stats
+Wallet & Balance
+bash
 curl -X POST http://localhost:8080/api/wallet/create
 curl http://localhost:8080/api/balance?address=foundation
+Transaction & Mining
+bash
 curl -X POST http://localhost:8080/api/transaction/send \
   -H "Content-Type: application/json" \
   -d '{"from":"foundation","to":"test","amount":100,"private_key":"test"}'
+
 curl -X POST http://localhost:8080/api/mine \
   -H "Content-Type: application/json" \
   -d '{"miner":"foundation"}'
+Authentication
+bash
 curl -X POST http://localhost:8080/api/auth/challenge \
   -H "Content-Type: application/json" \
   -d '{"address":"foundation"}'
@@ -135,6 +142,8 @@ curl http://localhost:8080/api/auth/verify \
   -H "Authorization: Bearer <token>"
 
 curl http://localhost:8080/api/auth/stats
+NFT
+bash
 curl -X POST http://localhost:8080/api/nft/collection/create \
   -H "Content-Type: application/json" \
   -d '{"name":"Heroes","creator":"foundation","royalty":5}'
@@ -145,6 +154,8 @@ curl -X POST http://localhost:8080/api/nft/mint \
 
 curl http://localhost:8080/api/nft/tokens
 curl http://localhost:8080/api/nft/stats
+🚀 Quick Start
+bash
 # Clone
 git clone https://github.com/Gruver87/absolute-blockchain-ultimate.git
 cd absolute-blockchain-ultimate
@@ -154,7 +165,19 @@ pip install -r requirements.txt
 
 # Run
 python ABSOLUTE_FINAL_FIXED.py
+Multi-window Launch
+WindowCommand
+1python ABSOLUTE_FINAL_FIXED.py
+2python telegram_super_bot.py
+3python testnet.py
+4python explorer.py
+5python gui.py
+6python monitor.py
+Stop All
+powershell
 Get-Process python | Stop-Process -Force
+🐳 Docker
+bash
 # Build
 docker build -t absolute-blockchain .
 
@@ -163,7 +186,6 @@ docker run -d -p 8080:8080 -p 8088:8088 -p 8090:8095 -p 9090:9090 -p 5000:5000 a
 
 # Run (minimal)
 docker run -p 8080:8080 absolute-blockchain
-http://localhost:8088/api/testnet/faucet/claim
 📊 Monitoring
 Prometheus metrics: http://localhost:9090/metrics
 
