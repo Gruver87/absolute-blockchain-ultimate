@@ -1,0 +1,21 @@
+{
+  "blocks": [
+    {
+      "number": 1,
+      "hash": "0x123"
+    },
+    {
+      "number": 2,
+      "hash": "0x456"
+    },
+    {
+      "transactions": [],
+      "hash": "0x789",
+      "number": 3,
+      "state_root": "803c383663b3d2550256ab08dbe5e0447b481cca4298dbd8a5f754432869e5d8"
+    }
+  ],
+  "state": {},
+  "receipts": [],
+  "peers": []
+}

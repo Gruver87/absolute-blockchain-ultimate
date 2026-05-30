@@ -1,0 +1,11 @@
+{
+  "": {
+    "status": "success",
+    "gas_used": 21000,
+    "from": "alice",
+    "to": "bob",
+    "amount": 50,
+    "sender_balance": 978950,
+    "receiver_balance": 50
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "0": {
+    "number": 0,
+    "timestamp": 1780142293,
+    "transactions": [],
+    "parent_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "proposer": "validator",
+    "state_root": "cc44328290ffb1cd240f0f65ae8c7a125fcbcbaee24aaeed815e5904de95e93c",
+    "gas_used": 0,
+    "hash": "a94a8999fdb7a5f0f8db256e98d6aa875ca553dc543cd0ee6aa06743d90d4c1a"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "0": {
+    "number": 0,
+    "timestamp": 1780141473,
+    "transactions": [
+      {
+        "from": "alice",
+        "to": "bob",
+        "amount": 50,
+        "gas": 21000
+      }
+    ],
+    "parent_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+    "proposer": "validator_1",
+    "state_root": "25e14ac8efb31361ac6ba593ef5a49f4506a28f0fbb47fccc0a150e2a3feb5e1",
+    "gas_used": 21000,
+    "hash": "9ab7ab8d9948c5e5bd6903caee7cc0208246d71fa784b30440983e08ab9e1d1f"
+  },
+  "1": {
+    "number": 1,
+    "hash": "block1"
+  }
+}
