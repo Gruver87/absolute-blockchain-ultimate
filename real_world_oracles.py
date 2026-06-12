@@ -29,9 +29,10 @@ class OracleManager:
     """Complete oracle system with real API integration"""
     
     def __init__(self):
-        # Real API keys
-        self.openweather_key = "a018c1c6ff1a688b7d40a0b6589c27b1"
-        self.weatherapi_key = "a8df2e8659789f30e3f7fe67d5b76eba"
+        # API keys только из переменных окружения (никогда не хардкодить в репозиторий)
+        import os
+        self.openweather_key = os.getenv("OPENWEATHER_API_KEY", "")
+        self.weatherapi_key = os.getenv("WEATHERAPI_KEY", "")
         
         # Cache
         self.price_cache: Dict[str, PriceData] = {}
