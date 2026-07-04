@@ -117,6 +117,7 @@ class Config:
     allow_insecure_public_bind: bool = False
     sqlite_synchronous: str = "NORMAL"      # prod: FULL
     metrics_enabled: bool = True
+    require_native_crypto: bool = False     # prod: require abs_native PyO3 kernels
 
     # ── Scale / HA (Phase 5) ────────────────────────────────────────────────
     redis_url: str = ""                     # redis://localhost:6379/0
@@ -213,6 +214,10 @@ class Config:
         self.monitor_port = env_int("MONITOR_PORT", self.monitor_port)
         self.rpc_proxy_port = env_int("RPC_PROXY_PORT", self.rpc_proxy_port)
         self.metrics_enabled = env_bool("METRICS_ENABLED", self.metrics_enabled)
+        self.require_native_crypto = env_bool(
+            "ABS_REQUIRE_NATIVE_CRYPTO",
+            self.require_native_crypto if not self.is_production else True,
+        )
         self.jwt_enforce_admin = env_bool("JWT_ENFORCE_ADMIN", self.jwt_enforce_admin)
         self.enable_cors_rpc_proxy = env_bool("ENABLE_CORS_RPC_PROXY", self.enable_cors_rpc_proxy)
         self.allow_insecure_public_bind = env_bool(
@@ -356,6 +361,15 @@ class Config:
                     "prod deployment blocks dev/test/routing/offchain features: "
                     + ", ".join(enabled_blocked)
                 )
+            if not self.require_native_crypto:
+                errors.append("prod mode requires ABS_REQUIRE_NATIVE_CRYPTO=true")
+        if self.require_native_crypto:
+            try:
+                from crypto import native
+                if not native.native_available():
+                    errors.append("ABS_REQUIRE_NATIVE_CRYPTO=true but abs_native is unavailable")
+            except Exception as e:
+                errors.append(f"ABS_REQUIRE_NATIVE_CRYPTO=true but native crypto check failed: {e}")
         if self.deployment_mode != "dev" and not self.allow_insecure_public_bind:
             public_http = self.http_host in ("0.0.0.0", "::", "")
             public_rpc = self.rpc_host in ("0.0.0.0", "::", "")
@@ -372,6 +386,17 @@ class Config:
             elif weak_secret(jwt_secret):
                 errors.append("prod JWT_SECRET is placeholder or too short")
         if self.is_production and self.bridge_enabled:
+            if self.bridge_mode == "rust":
+                try:
+                    from bridge.health import check_rust_bridge_binary
+                    bridge_status = check_rust_bridge_binary(self.resolve_rust_bridge_path())
+                    if not bridge_status.get("ok"):
+                        errors.append(
+                            "prod bridge rust binary smoke-test failed: "
+                            + str(bridge_status.get("error") or bridge_status)
+                        )
+                except Exception as e:
+                    errors.append(f"prod bridge rust binary smoke-test failed: {e}")
             if not self.bridge_oracle_secret:
                 errors.append("prod bridge requires BRIDGE_ORACLE_SECRET for relayer callbacks")
             elif weak_secret(self.bridge_oracle_secret):

@@ -155,6 +155,39 @@ def _bridge_for_request(handler_cls, cfg):
         return None
     return rust_bridge or getattr(handler_cls, "cross_bridge", None)
 
+
+def _rust_bridge_health(cfg) -> Dict:
+    """Return Rust bridge CLI health for readiness and metrics."""
+    enabled = bool(getattr(cfg, "bridge_enabled", False)) if cfg else False
+    mode = getattr(cfg, "bridge_mode", "unknown") if cfg else "unknown"
+    required = bool(enabled and mode == "rust" and _is_production_cfg(cfg))
+    out = {
+        "enabled": enabled,
+        "mode": mode,
+        "required": required,
+        "ok": True,
+        "path": "",
+        "error": "",
+    }
+    if not enabled or mode != "rust":
+        return out
+
+    try:
+        from bridge.health import check_rust_bridge_binary
+        resolve = getattr(cfg, "resolve_rust_bridge_path", None)
+        path = resolve() if callable(resolve) else getattr(cfg, "rust_bridge_path", "")
+        status = check_rust_bridge_binary(path, timeout=1.5)
+        out.update({
+            "ok": bool(status.get("ok")),
+            "path": status.get("path", path),
+            "error": status.get("error", ""),
+        })
+        if status.get("response"):
+            out["response"] = status["response"]
+    except Exception as exc:
+        out.update({"ok": False, "error": str(exc)})
+    return out
+
 # Devnet / probes: не считаем в rate limit (start_two_nodes, devnet_status, K8s)
 _RATE_LIMIT_EXEMPT_PATHS = frozenset({
     "/status",
@@ -208,6 +241,7 @@ _PUBLIC_API_ROUTES = [
     {"method": "GET", "path": "/status", "summary": "Node status"},
     {"method": "GET", "path": "/health/live", "summary": "Liveness probe"},
     {"method": "GET", "path": "/health/ready", "summary": "Readiness probe"},
+    {"method": "GET", "path": "/native/crypto", "summary": "Rust/PyO3 native crypto diagnostics"},
     {"method": "GET", "path": "/tokenomics", "summary": "ABS tokenomics"},
     {"method": "GET", "path": "/founder", "summary": "Founder allocation"},
     {"method": "GET", "path": "/allocation", "summary": "Genesis allocation"},
@@ -676,15 +710,32 @@ class RESTHandler(BaseHTTPRequestHandler):
                 return
 
             if path == "/health/ready":
+                from crypto import native
+                native_crypto = native.native_crypto_status(
+                    required=bool(getattr(cfg, "require_native_crypto", False))
+                )
+                bridge_health = _rust_bridge_health(cfg)
                 checks = {
                     "blockchain": bc is not None,
                     "database": db is not None,
                     "mempool": mp is not None,
+                    "native_crypto": (
+                        native_crypto["available"] and native_crypto["self_test"]
+                        if native_crypto["required"]
+                        else True
+                    ),
+                    "rust_bridge": (
+                        bool(bridge_health.get("ok"))
+                        if bridge_health.get("required")
+                        else True
+                    ),
                 }
                 ready = all(checks.values())
                 payload = {
                     "status": "ready" if ready else "not_ready",
                     "checks": checks,
+                    "native_crypto": native_crypto,
+                    "rust_bridge": bridge_health,
                     "height": bc.get_height() if bc else 0,
                 }
                 if ready:
@@ -709,6 +760,11 @@ class RESTHandler(BaseHTTPRequestHandler):
                     self._error(503, "Metrics collector unavailable")
                     return
                 validators = db.get_validators() if db else []
+                from crypto import native
+                native_crypto = native.native_crypto_status(
+                    required=bool(getattr(cfg, "require_native_crypto", False))
+                )
+                bridge_health = _rust_bridge_health(cfg)
                 text = mc.render_prometheus(
                     height=bc.get_height() if bc else 0,
                     peers=p2p.peer_count() if p2p else 0,
@@ -716,6 +772,8 @@ class RESTHandler(BaseHTTPRequestHandler):
                     validators=len(validators),
                     deployment_mode=getattr(cfg, "deployment_mode", "dev"),
                     node_id=getattr(cfg, "node_id", "node-1"),
+                    native_crypto=native_crypto,
+                    bridge_health=bridge_health,
                 )
                 body = text.encode()
                 self.send_response(200)
@@ -723,6 +781,23 @@ class RESTHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Length", len(body))
                 self.end_headers()
                 self.wfile.write(body)
+                return
+
+            if path == "/native/crypto":
+                from crypto import native
+                native_crypto = native.native_crypto_status(
+                    required=bool(getattr(cfg, "require_native_crypto", False))
+                )
+                self._json({
+                    "native_crypto": native_crypto,
+                    "ready": (
+                        native_crypto["available"] and native_crypto["self_test"]
+                        if native_crypto["required"]
+                        else True
+                    ),
+                    "node_id": getattr(cfg, "node_id", "node-1"),
+                    "deployment_mode": getattr(cfg, "deployment_mode", "dev"),
+                })
                 return
 
             # ── favicon (browsers always request it) ─────────────────────────
@@ -791,6 +866,11 @@ class RESTHandler(BaseHTTPRequestHandler):
                         })
                     if peer_heights:
                         peer_gap = max(p["gap"] for p in peer_heights)
+                from crypto import native
+                native_crypto = native.native_crypto_status(
+                    required=bool(getattr(cfg, "require_native_crypto", False))
+                )
+                bridge_health = _rust_bridge_health(cfg)
                 self._json({
                     "status": "running",
                     "node_version": cfg.node_version,
@@ -829,6 +909,8 @@ class RESTHandler(BaseHTTPRequestHandler):
                         or os.environ.get("BRIDGE_ORACLE_SECRET", "")
                     ),
                     "bridge_l1_queue_path": getattr(cfg, "bridge_l1_queue_path", "data/bridge_l1_queue.json"),
+                    "native_crypto": native_crypto,
+                    "rust_bridge": bridge_health,
                     "oracle_registry_enabled": self.__class__.oracle_registry is not None,
                     "api_wave": 61,
                     "core_real": {
@@ -841,6 +923,7 @@ class RESTHandler(BaseHTTPRequestHandler):
                         "bridge2_rust_path": bool(getattr(self.__class__, "bridge", None)),
                         "bridge_relayer_live": True,
                         "bridge_ci_l1_rpc": True,
+                        "native_crypto": native_crypto,
                     },
                     "lightning_enabled": self.__class__.lightning is not None,
                     "plasma_enabled": self.__class__.plasma is not None,
@@ -3398,7 +3481,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 try:
                     if hasattr(sa, "recover_account"):
                         ok = sa.recover_account(account, new_owner, guardians)
-                        self._json({"success": ok, "account": account, "new_owner": new_owner})
+                        if ok:
+                            self._json({"success": True, "account": account, "new_owner": new_owner})
+                        else:
+                            self._error(400, "recovery not approved")
                     elif hasattr(sa, "get_account"):
                         acc = sa.get_account(account)
                         if not acc:
@@ -3413,7 +3499,7 @@ class RESTHandler(BaseHTTPRequestHandler):
                         if req_id and acc.execute_recovery(req_id, new_owner):
                             self._json({"success": True, "account": account, "new_owner": new_owner, "request_id": req_id})
                         else:
-                            self._json({"success": False, "error": "recovery not approved"})
+                            self._error(400, "recovery not approved")
                     else:
                         self._error(501, "recovery not implemented")
                 except Exception as e:
@@ -3470,7 +3556,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 try:
                     if hasattr(nft, "create_auction"):
                         aid = nft.create_auction(token_id, seller, start_price, reserve, hours)
-                        self._json({"success": True, "auction_id": aid})
+                        if aid:
+                            self._json({"success": True, "auction_id": aid})
+                        else:
+                            self._error(400, "Could not create auction")
                     else:
                         self._error(501, "Auctions not supported by this NFT module")
                 except Exception as e:
@@ -3488,7 +3577,11 @@ class RESTHandler(BaseHTTPRequestHandler):
                 try:
                     if hasattr(nft, "place_bid"):
                         result = nft.place_bid(auction_id, bidder, amount)
-                        self._json({"success": bool(result), "result": result})
+                        if isinstance(result, dict) and result.get("success"):
+                            self._json({"success": True, "result": result})
+                        else:
+                            error = result.get("error", "Bid failed") if isinstance(result, dict) else "Bid failed"
+                            self._error(400, error)
                     else:
                         self._error(501, "Bidding not supported")
                 except Exception as e:
@@ -3506,10 +3599,23 @@ class RESTHandler(BaseHTTPRequestHandler):
                 try:
                     if hasattr(nft, "create_listing"):
                         lid = nft.create_listing(token_id, seller, price)
-                        self._json({"success": True, "listing_id": lid})
+                        if lid:
+                            self._json({"success": True, "listing_id": lid})
+                        else:
+                            self._error(400, "Could not create listing")
                     elif hasattr(nft, "list_token"):
                         lid = nft.list_token(token_id, seller, price)
-                        self._json({"success": True, "listing_id": lid})
+                        if lid:
+                            self._json({"success": True, "listing_id": lid})
+                        else:
+                            self._error(400, "Could not create listing")
+                    elif hasattr(nft, "list_for_sale"):
+                        result = nft.list_for_sale(token_id, seller, price)
+                        if isinstance(result, dict) and result.get("success"):
+                            self._json(result)
+                        else:
+                            error = result.get("error", "Could not list token") if isinstance(result, dict) else "Could not list token"
+                            self._error(400, error)
                     else:
                         self._error(501, "Listings not supported")
                 except Exception as e:
@@ -3587,7 +3693,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                     self._error(400, "token_id, bidder, price required"); return
                 if hasattr(nft, "make_offer"):
                     oid = nft.make_offer(token_id, bidder, price, hours)
-                    self._json({"success": bool(oid), "offer_id": oid})
+                    if oid:
+                        self._json({"success": True, "offer_id": oid})
+                    else:
+                        self._error(400, "Could not create offer")
                 else:
                     self._error(501, "Offers not supported")
 
@@ -3601,7 +3710,11 @@ class RESTHandler(BaseHTTPRequestHandler):
                     self._error(400, "offer_id and seller required"); return
                 if hasattr(nft, "accept_offer"):
                     result = nft.accept_offer(offer_id, seller)
-                    self._json(result)
+                    if isinstance(result, dict) and result.get("success"):
+                        self._json(result)
+                    else:
+                        error = result.get("error", "Could not accept offer") if isinstance(result, dict) else "Could not accept offer"
+                        self._error(400, error)
                 else:
                     self._error(501, "Offers not supported")
 
@@ -3614,7 +3727,11 @@ class RESTHandler(BaseHTTPRequestHandler):
                     self._error(400, "auction_id required"); return
                 if hasattr(nft, "finalize_auction"):
                     result = nft.finalize_auction(auction_id)
-                    self._json(result)
+                    if isinstance(result, dict) and result.get("success"):
+                        self._json(result)
+                    else:
+                        error = result.get("error", "Could not finalize auction") if isinstance(result, dict) else "Could not finalize auction"
+                        self._error(400, error)
                 else:
                     self._error(501, "Auctions not supported")
 
@@ -3705,7 +3822,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                     self._error(503, "Lightning not enabled"); return
                 cid = body.get("channel_id", "")
                 ok = ln.close_channel(cid) if cid else False
-                self._json({"success": ok, "channel_id": cid})
+                if ok:
+                    self._json({"success": True, "channel_id": cid})
+                else:
+                    self._error(400, "Could not close channel")
 
             elif path == "/lightning/pay":
                 ln = self.__class__.lightning
@@ -3748,7 +3868,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 wid = body.get("will_id", "")
                 owner = body.get("owner", "")
                 ok = cw.cancel_will(wid, owner) if wid and owner else False
-                self._json({"success": ok})
+                if ok:
+                    self._json({"success": True})
+                else:
+                    self._error(400, "Could not cancel will")
 
             elif path == "/will/execute":
                 cw = self.__class__.crypto_will
@@ -3759,7 +3882,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 if not wid:
                     self._error(400, "will_id required"); return
                 ok = cw.execute_will(wid, force=force) if hasattr(cw, "execute_will") else False
-                self._json({"success": bool(ok), "will_id": wid, "forced": force})
+                if ok:
+                    self._json({"success": True, "will_id": wid, "forced": force})
+                else:
+                    self._error(400, "Could not execute will")
 
             # ── Plasma Chain ──────────────────────────────────────────────────
             elif path == "/plasma/deposit":
@@ -3786,7 +3912,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 if not from_addr or not to_addr or amount <= 0:
                     self._error(400, "from, to, amount required"); return
                 txh = pl.submit_transaction(from_addr, to_addr, amount)
-                self._json({"success": bool(txh), "tx_hash": txh})
+                if txh:
+                    self._json({"success": True, "tx_hash": txh})
+                else:
+                    self._error(400, "Transfer failed (insufficient L2 balance)")
 
             elif path == "/plasma/submit-block":
                 pl = self.__class__.plasma
@@ -3798,13 +3927,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                     self._json({"success": True, "block": result})
                 else:
                     st = pl.get_stats() if hasattr(pl, "get_stats") else {}
-                    self._json({
-                        "success": False,
-                        "message": "No pending transactions",
-                        "pending_transactions": st.get("pending_transactions", 0),
-                        "blocks": st.get("blocks", 0),
-                        "hint": "POST /plasma/deposit or /plasma/tx first",
-                    })
+                    self._error(400, (
+                        "No pending transactions "
+                        f"(pending={st.get('pending_transactions', 0)}, blocks={st.get('blocks', 0)})"
+                    ))
 
             elif path == "/plasma/exit":
                 pl = self.__class__.plasma
@@ -3875,6 +4001,8 @@ class RESTHandler(BaseHTTPRequestHandler):
                 if not agent_id:
                     self._error(400, "agent_id required"); return
                 result = am.predict(agent_id, market_data)
+                if isinstance(result, dict) and result.get("error"):
+                    self._error(404, result.get("error", "Agent not found")); return
                 self._json(result)
 
             elif path == "/ai-agent/analyze":
@@ -3886,6 +4014,8 @@ class RESTHandler(BaseHTTPRequestHandler):
                 if not agent_id:
                     self._error(400, "agent_id required"); return
                 result = am.analyze(agent_id, price_history)
+                if isinstance(result, dict) and result.get("error"):
+                    self._error(404, result.get("error", "Agent not found")); return
                 self._json(result)
 
             elif path == "/ai-agent/trade":
@@ -3901,6 +4031,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 result = am.trade(agent_id, trade_type, amount, price)
                 if isinstance(result, dict) and result.get("error") == "Trade execution backend not configured":
                     self._error(503, result["error"])
+                    return
+                if isinstance(result, dict) and result.get("success") is False:
+                    status = 404 if result.get("error") == "Agent not found" else 400
+                    self._error(status, result.get("error", "Trade failed"))
                     return
                 self._json(result)
 
@@ -4017,7 +4151,10 @@ class RESTHandler(BaseHTTPRequestHandler):
                 force = bool(body.get("force", False))
                 if hasattr(plasma, "finalize_exit"):
                     ok = plasma.finalize_exit(exit_id, force=force)
-                    self._json({"success": bool(ok), "exit_id": exit_id, "forced": force})
+                    if ok:
+                        self._json({"success": True, "exit_id": exit_id, "forced": force})
+                    else:
+                        self._error(400, "Could not finalize exit")
                 else:
                     self._json({"success": False, "error": "finalize_exit not available"})
 
@@ -5786,6 +5923,7 @@ def _build_bridge_overview(rb, cb, cfg, db) -> Dict:
         }
     except Exception:
         overview["l1_rpc"] = {"eth_configured": False}
+    overview["rust_bridge_health"] = _rust_bridge_health(cfg)
     if rb and hasattr(rb, "get_stats"):
         overview["rust_bridge"] = rb.get_stats()
         overview["bridge_fees"] = overview["rust_bridge"].get("bridge_fees", {})
